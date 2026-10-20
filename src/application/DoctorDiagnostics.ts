@@ -233,8 +233,8 @@ const optionalHopperStartupTimeoutCheck = (
 
 /**
  * Project every native-analysis admission failure except the Hopper timeout,
- * which already has its own check. These settings block analysis before the
- * selected engine starts, so scoped provider readiness includes them.
+ * which already has its own check. Provider scopes include engine settings.
+ * Settings that block process start are marked for every doctor scope.
  */
 const runtimeConfigurationChecks = (
   host: DoctorHost,

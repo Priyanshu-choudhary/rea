@@ -34,5 +34,27 @@ for (const level of ["loud", "INFO"])
           }),
         ]),
       });
+
+      const client = await cli.run({
+        arguments: ["--json", "doctor", "--client", "codex"],
+        environment: { REA_LOG_LEVEL: level },
+      });
+      expect(client.exitCode, client.stderr).toBe(1);
+      expect(client.stderr).toBe("");
+      expect(client.json).toMatchObject({
+        healthy: false,
+        scope: { mode: "explicit", clients: ["codex"], providers: [] },
+        scope_checks: expect.arrayContaining([
+          expect.objectContaining({
+            name: "runtime-configuration:REA_LOG_LEVEL",
+            ok: false,
+          }),
+        ]),
+        informational_checks: expect.not.arrayContaining([
+          expect.objectContaining({
+            name: "runtime-configuration:REA_LOG_LEVEL",
+          }),
+        ]),
+      });
     },
   );

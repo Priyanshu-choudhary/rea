@@ -178,6 +178,59 @@ describe("doctor native analysis configuration", () => {
     );
   });
 
+  it("requires an invalid log level in every explicit scope", async () => {
+    const alignedCodex: ClientRegistrationStatus = {
+      client: "codex",
+      config_path: "/home/user/.codex/config.toml",
+      command: ["/current/rea", "mcp"],
+      state: "aligned",
+      remediation: null,
+    };
+    const selectedHost: DoctorHost = {
+      ...configurationHost({
+        REA_LOG_LEVEL: "verbose",
+        REA_GHIDRA_STARTUP_TIMEOUT_MS: "abc",
+      }),
+      clientRegistrations: () => Promise.resolve([alignedCodex]),
+    };
+
+    const client = await runDoctor(undefined, selectedHost, {
+      clients: ["codex"],
+    });
+    expect(client.healthy).toBe(false);
+    expect(client.scope_checks).toContainEqual(
+      expect.objectContaining({
+        name: "runtime-configuration:REA_LOG_LEVEL",
+        ok: false,
+        details: { setting: "REA_LOG_LEVEL" },
+      }),
+    );
+    expect(client.scope_checks).toContainEqual(
+      expect.objectContaining({ name: "registration:codex", ok: true }),
+    );
+    expect(client.scope_checks.map(({ name }) => name)).not.toContain(
+      "runtime-configuration:REA_GHIDRA_STARTUP_TIMEOUT_MS",
+    );
+    expect(client.informational_checks).toContainEqual(
+      expect.objectContaining({
+        name: "runtime-configuration:REA_GHIDRA_STARTUP_TIMEOUT_MS",
+        ok: false,
+      }),
+    );
+
+    const skill = await runDoctor(undefined, selectedHost, { skill: true });
+    expect(skill.healthy).toBe(false);
+    expect(skill.scope_checks).toContainEqual(
+      expect.objectContaining({
+        name: "runtime-configuration:REA_LOG_LEVEL",
+        ok: false,
+      }),
+    );
+    expect(skill.scope_checks).toContainEqual(
+      expect.objectContaining({ name: "skill:identity", ok: true }),
+    );
+  });
+
   it("does not treat a JEB-only timeout as native analysis configuration", async () => {
     const result = await runDoctor(
       undefined,

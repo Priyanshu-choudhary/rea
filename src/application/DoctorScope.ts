@@ -1,4 +1,5 @@
 import { uniqueSorted } from "../domain/canonicalOrdering.js";
+import { blocksProcessStart } from "../logger.js";
 import type {
   ClientRegistrationStatus,
   UnhealthyClientRegistrationStatus,
@@ -80,16 +81,29 @@ export const scopeDoctorChecks = (
   const hopperHostChecks = input.scope.providers.includes("hopper")
     ? input.checks.filter(({ name }) => name === "host")
     : [];
-  // Shared admission blocks every native engine before provider selection.
-  const runtimeConfigurationChecks =
+  // A process-start failure blocks the client and skill even with no provider.
+  const blocksProcess = (check: DoctorCheck): boolean => {
+    const setting = check.details?.setting;
+    return (
+      check.name.startsWith("runtime-configuration:") &&
+      typeof setting === "string" &&
+      blocksProcessStart(setting)
+    );
+  };
+  const processStartChecks = input.checks.filter(blocksProcess);
+  // Remaining admission failures block the selected native engine.
+  const nativeConfigurationChecks =
     input.scope.providers.length > 0
-      ? input.checks.filter(({ name }) =>
-          name.startsWith("runtime-configuration:"),
+      ? input.checks.filter(
+          (check) =>
+            check.name.startsWith("runtime-configuration:") &&
+            !blocksProcess(check),
         )
       : [];
   const scopeChecks = [
     ...coreChecks,
-    ...runtimeConfigurationChecks,
+    ...processStartChecks,
+    ...nativeConfigurationChecks,
     ...hopperHostChecks,
     ...selectedProviderChecks,
     ...clientChecks,
@@ -99,7 +113,8 @@ export const scopeDoctorChecks = (
   return {
     healthy:
       coreChecks.every(({ ok }) => ok) &&
-      runtimeConfigurationChecks.every(({ ok }) => ok) &&
+      processStartChecks.every(({ ok }) => ok) &&
+      nativeConfigurationChecks.every(({ ok }) => ok) &&
       hopperHostChecks.every(({ ok }) => ok) &&
       clientChecks.every(({ ok }) => ok) &&
       skillChecks.every(({ ok }) => ok) &&

@@ -58,7 +58,10 @@ import {
 import { registerReverseEngineeringCommands } from "./cli/reverseEngineeringCommands.js";
 import { registerCutterCommands } from "./cli/cutterCommands.js";
 
-/** Describe CLI settings that are invalid before any command runs, as MCP does. */
+/**
+ * Describe CLI settings that are invalid before any command runs, as MCP does.
+ * Keep this aligned with PROCESS_START_CONFIGURATION_SETTINGS.
+ */
 export const cliConfigurationError = (
   selectedEnvironment: Readonly<Record<string, string | undefined>>,
 ): string | undefined => {
