@@ -1,6 +1,6 @@
 import { constants } from "node:fs";
 import { access, lstat, stat } from "node:fs/promises";
-import { dirname, parse } from "node:path";
+import { dirname, posix, win32 } from "node:path";
 
 import type {
   DoctorProviderCheck,
@@ -228,7 +228,7 @@ const cacheCheck = async (
   const { cacheRoot, cacheMaxBytes } = configuration.value;
   const details = { cache_root: cacheRoot, cache_max_bytes: cacheMaxBytes };
   // A trailing separator makes lstat follow a dangling link and report ENOENT.
-  const inspected = cacheRootWithoutTrailingSeparator(cacheRoot);
+  const inspected = cacheRootWithoutTrailingSeparator(cacheRoot, platform);
   try {
     if (!(await stat(inspected)).isDirectory())
       return {
@@ -338,15 +338,19 @@ const entryAbsent = async (path: string): Promise<true | string> => {
   }
 };
 
-/** Drop a terminal separator without turning a filesystem root into its parent. */
-const cacheRootWithoutTrailingSeparator = (cacheRoot: string): string => {
-  const root = parse(cacheRoot).root;
+/**
+ * Drop a terminal separator without turning a filesystem root into its parent.
+ * On Darwin and Linux, `\` is a filename character, so only `/` is removed.
+ */
+const cacheRootWithoutTrailingSeparator = (
+  cacheRoot: string,
+  platform: NodeJS.Platform,
+): string => {
+  const pathApi = platform === "win32" ? win32 : posix;
+  const root = pathApi.parse(cacheRoot).root;
+  const separator = pathApi.sep.charCodeAt(0);
   let end = cacheRoot.length;
-  while (
-    end > root.length &&
-    (cacheRoot.charCodeAt(end - 1) === 47 ||
-      cacheRoot.charCodeAt(end - 1) === 92)
-  )
+  while (end > root.length && cacheRoot.charCodeAt(end - 1) === separator)
     end -= 1;
   return end === cacheRoot.length ? cacheRoot : cacheRoot.slice(0, end);
 };

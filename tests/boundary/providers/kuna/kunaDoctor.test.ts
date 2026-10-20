@@ -207,6 +207,31 @@ it("reports a dangling cache link as unusable and accepts a resolving link", asy
   await expect(lstat(join(dangling, "nested"))).rejects.toThrow();
 });
 
+it("keeps a trailing backslash as part of a POSIX cache path", async () => {
+  const root = await createTestTempDirectory("rea-kuna-doctor-backslash-");
+  const kuna = await writeFakeKuna(root);
+  const directory = join(root, "cache");
+  await mkdir(directory);
+  const named = `${directory}\\`;
+  await writeFile(named, "not-a-directory");
+
+  const inspection = await inspectKunaProvider({
+    REA_KUNA_COMMAND: kuna,
+    REA_KUNA_CACHE_DIR: named,
+  });
+
+  expect(inspection.available).toBe(false);
+  expect(inspection.checks[1]).toMatchObject({
+    name: "cache",
+    ok: false,
+    code: "open_options_invalid",
+    detail: expect.stringContaining(`${named} exists but is not a directory.`),
+    details: expect.objectContaining({ cache_root: named }),
+  });
+  expect((await lstat(directory)).isDirectory()).toBe(true);
+  expect((await lstat(named)).isFile()).toBe(true);
+});
+
 const doctorEnvironment = (root: string, kuna: string): NodeJS.ProcessEnv => ({
   HOME: root,
   PATH: "",
