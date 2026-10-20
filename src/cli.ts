@@ -82,7 +82,8 @@ export const createCli = (
 ): CliInstance => {
   const environment = snapshotEnvironment(selectedEnvironment);
   const analysis = createDirectAnalysis(environment);
-  // The executable reports an invalid level through cliConfigurationError.
+  // The executable reports an invalid level before every command except doctor.
+  // Doctor keeps going so its readiness report can name REA_LOG_LEVEL.
   const level =
     environment.REA_LOG_LEVEL === undefined
       ? undefined
