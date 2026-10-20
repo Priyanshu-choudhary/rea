@@ -141,11 +141,9 @@ describe("doctor Hopper startup timeout", () => {
       ),
     ).toHaveLength(1);
 
-    const ready = await runDoctor(
-      undefined,
-      timeoutHost("120000", ghidra),
-      { providers: ["ghidra"] },
-    );
+    const ready = await runDoctor(undefined, timeoutHost("120000", ghidra), {
+      providers: ["ghidra"],
+    });
     expect(ready.healthy).toBe(true);
     expect(ready.scope_checks).toContainEqual(
       expect.objectContaining({ name: "hopper-startup-timeout", ok: true }),
