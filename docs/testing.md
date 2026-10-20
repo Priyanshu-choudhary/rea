@@ -140,6 +140,11 @@ the fixture cache. These subprocesses are outside aggregate Vitest coverage;
 subprocess coverage attachment remains disabled. Cold-start import checks launch
 independently without this fixture cache.
 
+`analyzeJavaScriptDirectory` stdio MCP cases in one `cliTest` file share one
+server and that compile cache. The first case pays startup; later cases reuse
+the process. Pass `mcpCall` when a case needs its own server, environment, or
+lifecycle. CLI cases still start a fresh process.
+
 The Apple artifact verifier step shares a job-temporary bytecode cache among
 its fresh CLI/MCP children via `REA_ARTIFACT_NODE_COMPILE_CACHE`. The artifact
 helper maps this setting to child `NODE_COMPILE_CACHE`; npm, Turbo, and nested

@@ -25,10 +25,64 @@ export interface CliResult extends ProcessResult {
   readonly json: unknown | undefined;
 }
 
+/** One compiled stdio MCP tool call. */
+export type SharedMcpCall = Awaited<
+  ReturnType<
+    typeof import("../../fixtures/localToolsMcp.js").connectLocalToolsMcp
+  >
+>["call"];
+
 /** Compiled REA CLI driver owned by one test. */
 export interface TestCli {
   run(invocation: CliInvocation): Promise<CliResult>;
+  /**
+   * File-scoped stdio MCP caller. Present on `cliTest` drivers and absent for
+   * drivers created with `createTestCli` alone.
+   */
+  sharedMcpCall?(): Promise<SharedMcpCall>;
 }
+
+interface FileMcpSession {
+  call(): Promise<SharedMcpCall>;
+}
+
+/** Start at most one stdio server for the file, including after a failed handshake. */
+const createFileMcpSession = (
+  compileCache: string,
+): { session: FileMcpSession; close(): Promise<void> } => {
+  let pending: Promise<SharedMcpCall> | undefined;
+  const cleanups: Array<() => Promise<void>> = [];
+  const closeFailedHandshake = async (): Promise<void> => {
+    const failed = cleanups.splice(0).reverse();
+    for (const cleanup of failed) await cleanup();
+  };
+  return {
+    session: {
+      call: () => {
+        pending ??= import("../../fixtures/localToolsMcp.js")
+          .then(({ connectLocalToolsMcp }) =>
+            connectLocalToolsMcp(
+              { NODE_COMPILE_CACHE: compileCache },
+              (cleanup) => {
+                cleanups.push(cleanup);
+              },
+            ),
+          )
+          .then((mcp) => mcp.call)
+          .catch(async (error: unknown) => {
+            pending = undefined;
+            await closeFailedHandshake();
+            throw error;
+          });
+        return pending;
+      },
+    },
+    close: async () => {
+      const closers = cleanups.splice(0).reverse();
+      for (const cleanup of closers) await cleanup();
+    },
+  };
+};
 
 const parseJson = (stdout: string): unknown | undefined => {
   const document = stdout.trim();
@@ -92,6 +146,7 @@ export const createTestCli = (
 /** Vitest API extended with an owned process registry and compiled CLI driver. */
 export const cliTest = processTest.extend<{
   $test: { cli: TestCli };
+  $file: { mcpSession: FileMcpSession };
   $worker: { cliCompileCache: string };
 }>({
   cliCompileCache: [
@@ -106,7 +161,22 @@ export const cliTest = processTest.extend<{
     },
     { scope: "worker" },
   ],
-  cli: async ({ processes, cliCompileCache }, use) => {
-    await use(createTestCli(processes, cliCompileCache));
+  mcpSession: [
+    async ({ cliCompileCache }, use) => {
+      const opened = createFileMcpSession(cliCompileCache);
+      try {
+        await use(opened.session);
+      } finally {
+        await opened.close();
+      }
+    },
+    { scope: "file" },
+  ],
+  cli: async ({ processes, cliCompileCache, mcpSession }, use) => {
+    const cli = createTestCli(processes, cliCompileCache);
+    await use({
+      ...cli,
+      sharedMcpCall: () => mcpSession.call(),
+    });
   },
 });
