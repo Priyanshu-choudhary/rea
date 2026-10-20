@@ -10,7 +10,7 @@ import {
   allocateByDuration,
   parseTestDurations,
   readTestDurations,
-  scheduleCost,
+  scheduleWall,
 } from "../../ciTestSequencer.js";
 
 describe("CI test history", () => {
@@ -167,35 +167,71 @@ describe("duration shard allocation", () => {
     expect(new Set(shards!.flat()).size).toBe(items.length);
   });
 
-  it("charges serial files their full tail and overlaps parallel files", () => {
-    expect(scheduleCost(200, 2, 1)).toBe(100);
-    expect(scheduleCost(undefined, 1, 80)).toBe(80);
-    expect(() => scheduleCost(10, 0, 1)).toThrow(RangeError);
-
+  it("keeps each file whole and runs the serial group after the parallel group", () => {
     const parallel = (id: string, duration: number) => ({
       item: id,
       key: id,
       duration,
       laneWidth: 2,
+      groupOrder: 0,
     });
     const serial = (id: string, duration: number) => ({
       item: id,
       key: id,
       duration,
       laneWidth: 1,
+      groupOrder: 1,
     });
-    const shards = allocateByDuration(
-      [
-        parallel("wide", 300),
-        serial("tail-a", 100),
-        serial("tail-b", 100),
-        parallel("small", 40),
-      ],
-      2,
-    );
-    expect(shards).toEqual([
-      ["wide", "small"],
+    const paired = [
+      parallel("wide", 300),
+      parallel("peer", 300),
+      parallel("third", 300),
+    ];
+    expect(scheduleWall(paired.slice(0, 1), 1)).toBe(300);
+    expect(scheduleWall(paired.slice(0, 2), 1)).toBe(300);
+    expect(scheduleWall(paired, 1)).toBe(600);
+    expect(
+      scheduleWall([parallel("ordinary", 100), serial("tail", 60)], 1),
+    ).toBe(160);
+    expect(() =>
+      scheduleWall(
+        [parallel("wide", 10), { ...parallel("wide", 10), laneWidth: 1 }],
+        1,
+      ),
+    ).toThrow(RangeError);
+
+    const packed = [
+      parallel("ordinary", 100),
+      serial("tail-a", 60),
+      serial("tail-b", 60),
+    ];
+    expect(allocateByDuration(packed, 2)).toEqual([
+      ["ordinary"],
       ["tail-a", "tail-b"],
     ]);
+    const spread = [
+      parallel("wide", 300),
+      serial("tail-a", 100),
+      serial("tail-b", 100),
+      parallel("small", 40),
+    ];
+    const shards = allocateByDuration(spread, 2);
+    expect(shards).toEqual([["wide"], ["tail-a", "tail-b", "small"]]);
+    expect(
+      scheduleWall(
+        spread.filter((entry) => entry.item === "wide"),
+        1,
+      ),
+    ).toBe(300);
+    expect(
+      Math.max(
+        ...shards!.map((ids) =>
+          scheduleWall(
+            spread.filter((entry) => ids.includes(entry.item)),
+            1,
+          ),
+        ),
+      ),
+    ).toBe(300);
   });
 });
