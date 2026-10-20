@@ -141,6 +141,37 @@ test("keeps a failed MCP handshake when its cleanup also fails", async () => {
   expect(retained).toBe(2);
 });
 
+test("retries a reasonless MCP cleanup rejection on a later close", async () => {
+  const startup = new Error("handshake failed");
+  let attempts = 0;
+  let fail = true;
+  const session = createSharedMcpSession(async (registerCleanup) => {
+    registerCleanup(() => {
+      attempts += 1;
+      return fail ? Promise.reject() : Promise.resolve();
+    });
+    throw startup;
+  });
+  const caught = await session.session.call().then(
+    () => {
+      throw new Error("startup succeeded");
+    },
+    (error: unknown) => error,
+  );
+  expect(caught).toBeInstanceOf(Error);
+  if (!(caught instanceof Error)) throw new Error("expected startup failure");
+  expect(caught.message).toBe(startup.message);
+  expect(caught.cause).toBeInstanceOf(AggregateError);
+  const cause = caught.cause as AggregateError;
+  expect(cause.cause).toBe(startup);
+  expect([...cause.errors]).toEqual([startup, undefined]);
+  await expect(session.close()).rejects.toBeUndefined();
+  expect(attempts).toBe(2);
+  fail = false;
+  await session.close();
+  expect(attempts).toBe(3);
+});
+
 test("closes a shared MCP server registered after file cleanup starts", async () => {
   const startup = held();
   let closedServer = false;

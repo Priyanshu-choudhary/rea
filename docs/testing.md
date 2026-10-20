@@ -144,8 +144,9 @@ independently without this fixture cache.
 server and that compile cache. The first case pays startup; later cases reuse
 the process. File teardown waits for startup still in flight, closes a server
 registered during that wait, and does not open a server after close. A failed
-handshake stays the caller error when its cleanup also fails, and that cleanup
-is retried without repeating one that already succeeded. Pass
+handshake stays the caller error when its cleanup also fails, including a
+rejection without a reason. That cleanup stays owned until a later close
+releases it, and a cleanup that already succeeded is not run again. Pass
 `mcpCall` when a case needs its own server, environment, or lifecycle. CLI
 cases still start a fresh process.
 

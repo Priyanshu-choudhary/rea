@@ -78,6 +78,7 @@ export const createSharedMcpSession = (
   let pending: Promise<SharedMcpCall> | undefined;
   let closed = false;
   let closing: Promise<void> | undefined;
+  let closeGeneration: symbol | undefined;
   let cleanupQueue: Promise<void> = Promise.resolve();
   const cleanups: Array<() => Promise<void>> = [];
   const drain = (): Promise<void> => {
@@ -100,14 +101,14 @@ export const createSharedMcpSession = (
           }
         }
         for (const cleanup of retained.reverse()) cleanups.push(cleanup);
-        const failure = failures[0];
-        if (failures.length === 1 && failure !== undefined) throw failure;
+        // A reasonless rejection is `undefined` and still owns the cleanup.
         if (failures.length > 1) {
           throw new AggregateError(
             failures,
             "Shared MCP session cleanup failed",
           );
         }
+        if (failures.length === 1) throw failures[0];
       });
     cleanupQueue = run;
     return run;
@@ -142,14 +143,28 @@ export const createSharedMcpSession = (
     },
     close: () => {
       closed = true;
+      if (closing !== undefined) return closing;
       const starting = pending;
-      closing ??= (async () => {
-        if (starting !== undefined) {
-          await starting.catch(() => undefined);
+      const generation = Symbol("shared-mcp-close");
+      closeGeneration = generation;
+      const attempt = (async () => {
+        try {
+          if (starting !== undefined) {
+            await starting.catch(() => undefined);
+          }
+          await drain();
+        } catch (error) {
+          // A failed close stays retryable. Completion is cached only after
+          // every retained cleanup has succeeded.
+          if (closeGeneration === generation) {
+            closing = undefined;
+            closeGeneration = undefined;
+          }
+          throw error;
         }
-        await drain();
       })();
-      return closing;
+      closing = attempt;
+      return attempt;
     },
   };
 };
