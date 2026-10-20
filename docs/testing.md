@@ -454,8 +454,8 @@ partial diagnostics and preflights do not establish complete mutation outcomes
 or qualify the release revision for mutation coverage.
 
 Fast CI starts the source-only projects after classification, independently of
-build and static checks, and runs five built-dependent shards after the build.
-The six test jobs still select every portable test. Full qualification keeps six
+build and static checks, and runs eight built-dependent shards after the build.
+Those nine test jobs still select every portable test. Full qualification keeps six
 complete Vitest shards with coverage. Neither tier retries tests. Canonical
 project ownership lives in `scripts/lib/test-projects.mjs`, shared by Vitest,
 CI group execution, and development-test preparation. A test importing compiled
@@ -514,11 +514,27 @@ JSON artifact members without executing artifact content. Reports and limits
 are retained in `ci-health-diagnostics`; its ten-minute job limit covers the
 existing four-minute timing collection plus the bounded diagnostic stages.
 
-Shard-count reduction remains deferred: the available successful timing sample
-covers an older inventory, and file phase weights are not job wall time. The
-one-source/five-built split retains six test jobs; it makes no hosted speedup
-claim. Current complete timings and completed candidate hosted runs are needed
-before enabling a smaller adaptive matrix.
+The uncontended fast portable budget is under ten minutes from workflow start
+through the slowest built shard. On 2026-10-20, successful fast shard
+`39451447866` spent 859 seconds in built Vitest and about 20 seconds on
+checkout, Node setup, npm cache restore, `npm ci` (9 seconds), and the runtime
+download. `node_modules` is about 674 MiB, so publishing it as a shared
+artifact would transfer more data than that install saves. The npm download
+cache stays the setup cache. File timings from fast run `39451548945` put the
+built suite at about 7941 seconds of module time. With two workers, five shards
+schedule to about 839 seconds; eight shards, after the 578-second loader matrix
+is split into three files, schedule to about 513–526 seconds plus the measured
+20-second setup, near nine minutes. That model is a two-worker schedule of one
+run's file durations, not a hosted before/after of this matrix. Six built
+shards still schedule above eleven minutes, so fast feedback uses eight.
+`process-boundary` stays serial because process-tree sampling shares the host.
+The sequencer charges those files their full tail, and parallel files at
+`1 / maxWorkers`, so a serial clump does not hide inside a raw duration sum.
+Raising the worker cap from two to four on this four-core host cut a six-file
+acceptance sample from 96–101 seconds to 71 seconds and did not remove the
+single-file floor, so the cap stays two. Full qualification keeps six covered
+shards; its longer instrumentation is outside this fast budget. Hosted queue
+time is separate and grows when more shard jobs compete for runners.
 
 The separate `CI timings` workflow batches recent completed CI and Release runs
 hourly or on manual dispatch. It uploads `ci-job-timings-batch` with raw API pages and
@@ -1110,7 +1126,7 @@ suite, without the source-test shards or native package
 lanes. Classification compares the PR head with its merge base, so later
 base-branch changes do not expand that scope. Static and portable-test aggregate jobs
 remain present and fail if classification fails. Every code change retains the
-complete six-shard Linux suite; individual test files are not selected by
+complete portable Linux suite; individual test files are not selected by
 imports or filenames.
 
 Ordinary PRs also produce an **observational** test-selection plan. The candidate
@@ -1121,7 +1137,7 @@ tests. Shared inputs, unknown paths, missing owner tests, and removed tests fall
 back to the complete inventory. Renames account for both paths. Main, scheduled,
 manual, and `ci:full` runs always propose the full suite.
 
-All six shards still execute the complete suite. The existing report merge
+The source group and every built shard together still execute the complete suite. The existing report merge
 compares the proposal with actual module outcomes and retains
 `.cache/ci-test-selection/report.json` in `test-results`, including selected and
 omitted paths, changed input paths, missed failures, unobserved files, scheduling weights, PR head and
@@ -1199,7 +1215,7 @@ successful ancestor push run of this CI workflow, rather than the preceding
 push: changes from failed or cancelled intermediate runs remain in scope.
 Missing, untrusted, or non-ancestor history selects every lane. The lookup is
 bounded to the last 100 successful push runs; lookup failures broaden selection.
-Every code change still selects all six portable shards, without coverage
+Every code change still selects the source group and all eight fast built shards, without coverage
 instrumentation in this fast tier. Ordinary PR matrices cancel remaining
 shards after the first failure; passing PRs execute the complete suite. Main,
 `ci:full`, scheduled, manual, and release qualification retain every shard's
