@@ -241,26 +241,89 @@ it("shares static task snapshots only after validation using the npm cache owner
   expect(steps.indexOf(save!)).toBeGreaterThan(
     steps.findIndex((step) => step.run === "npm run test:python"),
   );
+  expect(
+    steps.find((step) => step.run === "node scripts/ci/cache-retention.mjs"),
+  ).toBeUndefined();
+});
+
+it("deletes superseded caches only from the trusted follow-up workflow", async () => {
+  const workflow = z
+    .object({
+      on: z.object({
+        workflow_run: z.object({
+          workflows: z.array(z.literal("CI")),
+          types: z.array(z.literal("completed")),
+        }),
+        workflow_call: z.unknown().optional(),
+        pull_request: z.unknown().optional(),
+      }),
+      permissions: z.record(z.string(), z.string()),
+      jobs: z.record(
+        z.string(),
+        z.object({
+          if: z.string(),
+          "runs-on": z.literal("ubuntu-latest"),
+          steps: z.array(z.record(z.string(), z.unknown())),
+        }),
+      ),
+    })
+    .parse(
+      parse(
+        await readFile(
+          join(repository, ".github/workflows/cache-retention.yml"),
+          "utf8",
+        ),
+      ),
+    );
+  expect(workflow.on.workflow_call).toBeUndefined();
+  expect(workflow.on.pull_request).toBeUndefined();
+  expect(workflow.permissions).toEqual({
+    contents: "read",
+    actions: "write",
+  });
+  const job = workflow.jobs.retain;
+  expect(job?.if).toContain(
+    "github.event.workflow_run.conclusion == 'success'",
+  );
+  expect(job?.if).toContain(
+    "github.event.workflow_run.head_repository.full_name == github.repository",
+  );
+  expect(job?.if).toContain(
+    "github.event.workflow_run.head_branch == github.event.repository.default_branch",
+  );
+  expect(job?.if).toContain("github.event.workflow_run.event == 'push'");
+  expect(job?.if).toContain("github.event.workflow_run.event == 'schedule'");
+  expect(job?.if).toContain(
+    "github.event.workflow_run.event == 'workflow_dispatch'",
+  );
+  expect(job?.if).not.toContain("pull_request");
+  const steps = job?.steps ?? [];
+  expect(steps.some((step) => step.run === "npm ci")).toBe(false);
+  const checkout = steps[0];
+  expect(checkout?.uses).toBe(
+    "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+  );
+  expect(checkout?.with).toMatchObject({
+    ref: "${{ github.event.workflow_run.head_sha }}",
+    "persist-credentials": false,
+  });
   const retention = steps.find(
     (step) => step.run === "node scripts/ci/cache-retention.mjs",
   );
-  expect(retention?.["continue-on-error"]).toBe(true);
-  expect(retention?.if).toContain("success()");
-  expect(retention?.if).toContain("needs.changes.outputs.code == 'true'");
-  expect(retention?.if).toContain("steps.npm-cache.outputs.can-save == 'true'");
-  expect(steps.indexOf(retention!)).toBeGreaterThan(steps.indexOf(save!));
   const retentionEnv = z.record(z.string(), z.string()).parse(retention?.env);
   expect(retentionEnv.CACHE_PREFIX).toBe(
     "rea-static-v1-${{ runner.os }}-${{ runner.arch }}-",
   );
   expect(retentionEnv.CACHE_KEEP_KEY).toBe(
-    "${{ steps.static-cache.outputs.cache-primary-key }}",
+    "rea-static-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.nvmrc', '.npmrc', 'package-lock.json') }}-${{ github.event.workflow_run.head_sha }}",
   );
   expect(retentionEnv.CACHE_PORTABLE_PREFIX).toBe(
     "rea-portable-build-v2-${{ runner.os }}-${{ runner.arch }}-",
   );
   expect(retentionEnv.DEDUPE_NPM_DOWNLOADS).toBe("true");
   expect(retentionEnv.GH_TOKEN).toBe("${{ github.token }}");
+  const ci = (await readWorkflows()).find(({ file }) => file === "ci.yml");
+  expect(JSON.stringify(ci?.workflow)).not.toContain('"actions":"write"');
 });
 
 it("publishes each hosted npm download cache from one writer", async () => {
@@ -286,10 +349,7 @@ it("publishes each hosted npm download cache from one writer", async () => {
     { file: "ci.yml", job: "windows-curated", save: "true" },
   ]);
   const ci = workflows.find(({ file }) => file === "ci.yml");
-  expect(ci?.workflow.jobs?.static?.permissions).toEqual({
-    contents: "read",
-    actions: "write",
-  });
+  expect(ci?.workflow.jobs?.static?.permissions).toBeUndefined();
   expect(ci?.workflow.jobs?.build?.permissions).toEqual({
     contents: "read",
     actions: "read",

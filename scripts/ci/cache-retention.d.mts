@@ -9,6 +9,8 @@ export interface RetainedCacheEntry {
 export interface CacheListRecord {
   readonly id: number;
   readonly key: string;
+  readonly version: string;
+  readonly ref: string;
   readonly created_at: string;
   readonly last_accessed_at?: string;
   readonly size_in_bytes: number;
@@ -27,13 +29,13 @@ export type CacheRequest = (
 export function assertRetentionPrefix(prefix: string): void;
 
 export function selectPrefixDeletions(
-  caches: readonly CacheListRecord[],
+  caches: readonly unknown[],
   family?: RetentionFamily,
   keepGenerations?: number,
 ): RetainedCacheEntry[];
 
 export function selectNpmDownloadDuplicateDeletions(
-  caches: readonly CacheListRecord[],
+  caches: readonly unknown[],
 ): RetainedCacheEntry[];
 
 export function listAllCaches(

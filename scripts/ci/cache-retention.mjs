@@ -46,7 +46,15 @@ function normalizeCache(cache, index) {
     );
   if (!Number.isSafeInteger(size) || size < 0)
     throw new Error(`Cache entry ${String(index + 1)} has an invalid size`);
-  return { id, key, createdAt, accessedAt, size };
+  // actions/cache restores a key only when this metadata hash matches.
+  const version = cache.version;
+  if (typeof version !== "string" || !/^[a-f0-9]{64}$/u.test(version))
+    throw new Error(`Cache entry ${String(index + 1)} has an invalid version`);
+  // The git ref is the cache's access scope. Another branch cannot use it.
+  const ref = cache.ref;
+  if (typeof ref !== "string" || !/^refs\/[^\s]+$/u.test(ref))
+    throw new Error(`Cache entry ${String(index + 1)} has an invalid ref`);
+  return { id, key, version, ref, createdAt, accessedAt, size };
 }
 
 function byNewest(left, right) {
@@ -93,7 +101,11 @@ export function selectPrefixDeletions(
   return entries.filter((entry) => !protectedIds.has(entry.id));
 }
 
-/** Drop extra copies of one npm download key. Distinct lockfile keys stay. */
+/**
+ * Drop extra copies of one npm restore target. Records that share a user key
+ * but differ by cache version or git ref stay, because a workflow can restore
+ * only a matching version inside its visible scope.
+ */
 export function selectNpmDownloadDuplicateDeletions(caches) {
   const entries = caches.map(normalizeCache);
   for (const entry of entries)
@@ -103,9 +115,10 @@ export function selectNpmDownloadDuplicateDeletions(caches) {
       );
   const groups = new Map();
   for (const entry of entries) {
-    const group = groups.get(entry.key) ?? [];
+    const identity = `${entry.version}\n${entry.ref}\n${entry.key}`;
+    const group = groups.get(identity) ?? [];
     group.push(entry);
-    groups.set(entry.key, group);
+    groups.set(identity, group);
   }
   const deletions = [];
   for (const group of groups.values()) {

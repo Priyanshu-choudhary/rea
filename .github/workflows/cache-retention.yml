@@ -1,0 +1,48 @@
+name: Cache retention
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+# Qualification calls ci.yml with actions: read. A nested workflow cannot raise
+# that token, so cache deletion stays in this workflow.
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: cache-retention-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+jobs:
+  retain:
+    name: Retain Turbo snapshots and npm download caches
+    # Checkout and run only a same-repository default-branch commit. Pull
+    # requests, including forks, do not reach these steps.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.head_branch == github.event.repository.default_branch &&
+      (github.event.workflow_run.event == 'push' ||
+      github.event.workflow_run.event == 'schedule' ||
+      github.event.workflow_run.event == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+      - name: Retain current Turbo snapshots and npm download caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_REPOSITORY: ${{ github.repository }}
+          CACHE_PREFIX: rea-static-v1-${{ runner.os }}-${{ runner.arch }}-
+          CACHE_KEEP_KEY: rea-static-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('.nvmrc', '.npmrc', 'package-lock.json') }}-${{ github.event.workflow_run.head_sha }}
+          CACHE_PORTABLE_PREFIX: rea-portable-build-v2-${{ runner.os }}-${{ runner.arch }}-
+          DEDUPE_NPM_DOWNLOADS: "true"
+        run: node scripts/ci/cache-retention.mjs

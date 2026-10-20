@@ -18,9 +18,13 @@ const cache = (
   created: string,
   accessed = created,
   size = 100,
+  version = "a".repeat(64),
+  ref = "refs/heads/main",
 ) => ({
   id,
   key,
+  version,
+  ref,
   created_at: created,
   last_accessed_at: accessed,
   size_in_bytes: size,
@@ -99,11 +103,29 @@ describe("Turbo snapshot retention", () => {
 });
 
 describe("npm download duplicate retention", () => {
-  it("deletes only older copies of the same key", () => {
+  it("deletes only an older copy of the same key, version, and ref", () => {
     const key = "npm-download-Linux-x64-lock";
+    const version = "a".repeat(64);
+    const ref = "refs/heads/main";
     const deletions = selectNpmDownloadDuplicateDeletions([
-      cache(1, key, "2026-10-20T01:00:00Z", "2026-10-20T02:00:00Z", 179),
-      cache(2, key, "2026-10-20T01:05:00Z", "2026-10-20T03:00:00Z", 199),
+      cache(
+        1,
+        key,
+        "2026-10-20T01:00:00Z",
+        "2026-10-20T02:00:00Z",
+        179,
+        version,
+        ref,
+      ),
+      cache(
+        2,
+        key,
+        "2026-10-20T01:05:00Z",
+        "2026-10-20T03:00:00Z",
+        199,
+        version,
+        ref,
+      ),
       cache(
         3,
         "npm-download-Windows-x64-lock",
@@ -113,6 +135,58 @@ describe("npm download duplicate retention", () => {
       ),
     ]);
     expect(deletions.map((entry) => entry.id)).toEqual([1]);
+  });
+
+  it("keeps records that share a key but differ by version or ref", () => {
+    const key = "npm-download-Linux-x64-lock";
+    const version = "a".repeat(64);
+    const otherVersion = "b".repeat(64);
+    const deletions = selectNpmDownloadDuplicateDeletions([
+      cache(
+        1,
+        key,
+        "2026-10-20T01:00:00Z",
+        "2026-10-20T04:00:00Z",
+        199,
+        version,
+        "refs/heads/main",
+      ),
+      cache(
+        2,
+        key,
+        "2026-10-20T01:00:00Z",
+        "2026-10-20T03:00:00Z",
+        188,
+        otherVersion,
+        "refs/heads/main",
+      ),
+      cache(
+        3,
+        key,
+        "2026-10-20T01:00:00Z",
+        "2026-10-20T02:00:00Z",
+        180,
+        version,
+        "refs/heads/feature",
+      ),
+    ]);
+    expect(deletions).toEqual([]);
+  });
+
+  it("refuses a download record without a version or ref", () => {
+    const key = "npm-download-Linux-x64-lock";
+    const { version: _version, ...withoutVersion } = cache(
+      1,
+      key,
+      "2026-10-20T01:00:00Z",
+    );
+    expect(() => selectNpmDownloadDuplicateDeletions([withoutVersion])).toThrow(
+      /version/u,
+    );
+    const { ref: _ref, ...withoutRef } = cache(2, key, "2026-10-20T01:00:00Z");
+    expect(() => selectNpmDownloadDuplicateDeletions([withoutRef])).toThrow(
+      /ref/u,
+    );
   });
 
   it("refuses a Turbo snapshot in the download list", () => {

@@ -1331,13 +1331,18 @@ the repository's default branch may save shared npm caches, and only from the
 opted-in writer for that host: Static checks for Linux x64, the package matrix
 for every other included host, and the Windows curated lane. Every other job
 restores without saving, so parallel jobs do not publish duplicate copies.
-Pull requests restore only. Static snapshots use the same write authority and
-are saved only after the static job's validation succeeds. That job then deletes
-older `rea-static-v1` and `rea-portable-build-v2` entries for its OS and
-architecture, keeping two generations plus the key it saved, and deletes
-duplicate npm download keys down to the most recently accessed copy. An
-incomplete or unexpected cache list deletes nothing. Distinct lockfile
-generations of the download cache stay, so the restore prefix still has a seed.
+Pull requests restore only. Static snapshots are saved only after the static
+job's validation succeeds. Cache deletion is a
+separate workflow, because reusable qualification calls this workflow and
+cannot raise its read-only token. After a successful push, schedule, or manual
+CI run on the default branch, that workflow deletes older `rea-static-v1` and
+`rea-portable-build-v2` entries for Linux x64, keeping two generations plus the
+static key that run saved. It deletes an npm download record only when another
+record has the same key, cache version, and git ref, and it keeps the most
+recently accessed copy. A different version or ref is a different restore
+target and stays. An incomplete or unexpected cache list deletes nothing.
+Distinct lockfile generations of the download cache stay, so the restore
+prefix still has a seed.
 Main warms the new cache namespace after merge; a cold cache falls back to the
 normal install. This prevents each PR from saving another branch-scoped copy of
 the same download cache. It does not remove runner assignment waits.
