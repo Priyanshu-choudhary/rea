@@ -286,6 +286,15 @@ it("deletes superseded caches only from the trusted follow-up workflow", async (
     "github.event.workflow_run.conclusion == 'success'",
   );
   expect(job?.if).toContain(
+    "github.event.workflow_run.conclusion == 'failure'",
+  );
+  expect(job?.if).toContain(
+    "github.event.workflow_run.conclusion == 'timed_out'",
+  );
+  expect(job?.if).toContain(
+    "github.event.workflow_run.conclusion == 'cancelled'",
+  );
+  expect(job?.if).toContain(
     "github.event.workflow_run.head_repository.full_name == github.repository",
   );
   expect(job?.if).toContain(

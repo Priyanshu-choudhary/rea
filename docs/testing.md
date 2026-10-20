@@ -1334,8 +1334,9 @@ restores without saving, so parallel jobs do not publish duplicate copies.
 Pull requests restore only. Static snapshots are saved only after the static
 job's validation succeeds. Cache deletion is a
 separate workflow, because reusable qualification calls this workflow and
-cannot raise its read-only token. After a successful push, schedule, or manual
-CI run on the default branch, that workflow deletes older `rea-static-v1` and
+cannot raise its read-only token. After a push, schedule, or manual CI run on
+the default branch finishes, including when a later lane fails, times out, or
+is cancelled, that workflow deletes older `rea-static-v1` and
 `rea-portable-build-v2` entries for Linux x64, keeping two generations plus the
 static key that run saved. It deletes an npm download record only when another
 record has the same key, cache version, and git ref, and it keeps the most
