@@ -12,7 +12,7 @@ const PAGE_SIZE = 100;
 // Keep the newest snapshots, not only the key just saved. A concurrent job may
 // still be restoring the previous generation; deleting that id fails its restore.
 // The following trusted run drops anything older than those two.
-export const RETAINED_CACHE_GENERATIONS = 2;
+const RETAINED_CACHE_GENERATIONS = 2;
 
 const PREFIX_PATTERNS = [
   /^rea-static-v1-[A-Za-z0-9]+-[A-Za-z0-9]+-$/u,
