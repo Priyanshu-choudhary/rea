@@ -102,6 +102,98 @@ describe("doctor Hopper startup timeout", () => {
   });
 });
 
+describe("doctor native analysis configuration", () => {
+  const configurationHost = (
+    environment: Readonly<NodeJS.ProcessEnv>,
+  ): DoctorHost => ({
+    ...systemDoctorHost({ environment: { ...environment } }),
+    ...host({
+      installationPaths: () => Promise.resolve([]),
+      clientRegistrations: () => Promise.resolve([]),
+    }),
+  });
+
+  it.each([
+    ["REA_ANALYSIS_PROVIDER", "Hopper"],
+    ["REA_GHIDRA_STARTUP_TIMEOUT_MS", "abc"],
+    ["REA_SWIFTC_COMPILE_TIMEOUT_MS", "0"],
+    ["REA_LOG_LEVEL", "verbose"],
+    ["REA_GHIDRA_COMPILER_SPEC_ID", "gcc"],
+  ] as const)(
+    "rejects %s before scoped Hopper readiness reports success",
+    async (setting, value) => {
+      const result = await runDoctor(
+        undefined,
+        configurationHost({ [setting]: value }),
+        { providers: ["hopper"] },
+      );
+
+      expect(result.healthy).toBe(false);
+      expect(result.environment_healthy).toBe(false);
+      expect(result.scope_checks).toContainEqual(
+        expect.objectContaining({
+          name: `runtime-configuration:${setting}`,
+          ok: false,
+          classification: "config_drift",
+          detail: expect.stringContaining(setting),
+          remediation: expect.stringContaining(setting),
+          details: { setting },
+        }),
+      );
+    },
+  );
+
+  it("keeps a lowercase provider preference ready for the selected engine", async () => {
+    const result = await runDoctor(
+      undefined,
+      configurationHost({ REA_ANALYSIS_PROVIDER: "hopper" }),
+      { providers: ["hopper"] },
+    );
+
+    expect(result.healthy).toBe(true);
+    expect(
+      result.checks.some(({ name }) =>
+        name.startsWith("runtime-configuration:"),
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps an invalid native setting informational outside a provider scope", async () => {
+    const result = await runDoctor(
+      undefined,
+      configurationHost({ REA_GHIDRA_STARTUP_TIMEOUT_MS: "abc" }),
+      { providers: [] },
+    );
+
+    expect(result.healthy).toBe(true);
+    expect(result.environment_healthy).toBe(false);
+    expect(result.scope_checks.map(({ name }) => name)).not.toContain(
+      "runtime-configuration:REA_GHIDRA_STARTUP_TIMEOUT_MS",
+    );
+    expect(result.informational_checks).toContainEqual(
+      expect.objectContaining({
+        name: "runtime-configuration:REA_GHIDRA_STARTUP_TIMEOUT_MS",
+        ok: false,
+      }),
+    );
+  });
+
+  it("does not treat a JEB-only timeout as native analysis configuration", async () => {
+    const result = await runDoctor(
+      undefined,
+      configurationHost({ REA_JEB_MCP_TIMEOUT_MS: "abc" }),
+      { providers: ["hopper"] },
+    );
+
+    expect(result.healthy).toBe(true);
+    expect(
+      result.checks.some(({ name }) =>
+        name.startsWith("runtime-configuration:"),
+      ),
+    ).toBe(false);
+  });
+});
+
 describe("doctor runtime check", () => {
   it("reports Node 25 as unsupported", async () => {
     const result = await runDoctor(

@@ -80,8 +80,16 @@ export const scopeDoctorChecks = (
   const hopperHostChecks = input.scope.providers.includes("hopper")
     ? input.checks.filter(({ name }) => name === "host")
     : [];
+  // Shared admission blocks every native engine before provider selection.
+  const runtimeConfigurationChecks =
+    input.scope.providers.length > 0
+      ? input.checks.filter(({ name }) =>
+          name.startsWith("runtime-configuration:"),
+        )
+      : [];
   const scopeChecks = [
     ...coreChecks,
+    ...runtimeConfigurationChecks,
     ...hopperHostChecks,
     ...selectedProviderChecks,
     ...clientChecks,
@@ -91,6 +99,7 @@ export const scopeDoctorChecks = (
   return {
     healthy:
       coreChecks.every(({ ok }) => ok) &&
+      runtimeConfigurationChecks.every(({ ok }) => ok) &&
       hopperHostChecks.every(({ ok }) => ok) &&
       clientChecks.every(({ ok }) => ok) &&
       skillChecks.every(({ ok }) => ok) &&
