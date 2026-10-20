@@ -220,7 +220,8 @@ jobs:
       fail-fast: ${{ github.event_name == 'pull_request' && needs.changes.outputs.tier == 'fast' }}
       matrix:
         # Fast feedback uses one source group and eight built groups so the
-        # slowest built job can finish inside the ten-minute portable budget.
+        # slowest built shard job stays inside a ten-minute execution budget.
+        # Classification, build, and report merge sit outside that job.
         # Full qualification retains six complete shards with coverage.
         shard: ${{ fromJSON(needs.changes.outputs.tier == 'fast' && '["1/8","2/8","3/8","4/8","5/8","6/8","7/8","8/8"]' || '["1/6","2/6","3/6","4/6","5/6","6/6"]') }}
     steps:

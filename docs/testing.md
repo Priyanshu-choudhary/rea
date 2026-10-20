@@ -514,27 +514,35 @@ JSON artifact members without executing artifact content. Reports and limits
 are retained in `ci-health-diagnostics`; its ten-minute job limit covers the
 existing four-minute timing collection plus the bounded diagnostic stages.
 
-The uncontended fast portable budget is under ten minutes from workflow start
-through the slowest built shard. On 2026-10-20, successful fast shard
-`39451447866` spent 859 seconds in built Vitest and about 20 seconds on
-checkout, Node setup, npm cache restore, `npm ci` (9 seconds), and the runtime
-download. `node_modules` is about 674 MiB, so publishing it as a shared
-artifact would transfer more data than that install saves. The npm download
-cache stays the setup cache. File timings from fast run `39451548945` put the
-built suite at about 7941 seconds of module time. With two workers, five shards
-schedule to about 839 seconds; eight shards, after the 578-second loader matrix
-is split into three files, schedule to about 513–526 seconds plus the measured
-20-second setup, near nine minutes. That model is a two-worker schedule of one
-run's file durations, not a hosted before/after of this matrix. Six built
-shards still schedule above eleven minutes, so fast feedback uses eight.
+Fast built shards target under ten minutes of uncontended shard-job execution.
+That figure is the `test-shard` job. The job waits for classification and the
+build, and the portable-test merge runs after the slowest shard. On 2026-10-20,
+run `39451548945` measured those surrounding jobs with runner queue excluded:
+classification 15 seconds, build 49 seconds, and the portable-test merge 29
+seconds. Shard 1/5 of that run spent 22 seconds before built Vitest and 3
+seconds after it, including `npm ci` at 9 seconds. `node_modules` is about 674
+MiB, so publishing it as a shared artifact would transfer more data than that
+install saves. The npm download cache stays the setup cache.
+
+File timings from that run put the built suite at 7944 seconds of module time.
+The sequencer keeps each file's full duration on one worker. Extra workers
+overlap other files in the same sequence group, and `process-boundary` runs
+after that group. Scheduling the unsplit inventory onto five shards peaks at
+820 seconds of tests. That run's slowest built shard job lasted 925 seconds
+(shard 4/5), and shard 1/5 spent 874 seconds in built Vitest, so hosted job
+time sits above the file schedule. Six shards of the same inventory peak at
+684 seconds of tests. Eight shards, after the 578-second loader file is split
+by case count (54 cases stay in that file and 46 move into each of three
+files), peak at 513 seconds of tests. With the measured 25-second shard setup,
+that shard job is about 538 seconds. Adding the measured classification, build,
+and merge makes an uncontended portable critical path of about 631 seconds,
+still before the gap between this file schedule and hosted Vitest. Runner queue
+is separate and grows when more shard jobs compete for runners.
 `process-boundary` stays serial because process-tree sampling shares the host.
-The sequencer charges those files their full tail, and parallel files at
-`1 / maxWorkers`, so a serial clump does not hide inside a raw duration sum.
 Raising the worker cap from two to four on this four-core host cut a six-file
 acceptance sample from 96–101 seconds to 71 seconds and did not remove the
 single-file floor, so the cap stays two. Full qualification keeps six covered
-shards; its longer instrumentation is outside this fast budget. Hosted queue
-time is separate and grows when more shard jobs compete for runners.
+shards; its longer instrumentation is outside this fast budget.
 
 The separate `CI timings` workflow batches recent completed CI and Release runs
 hourly or on manual dispatch. It uploads `ci-job-timings-batch` with raw API pages and
