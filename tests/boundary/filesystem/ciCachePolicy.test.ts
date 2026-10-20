@@ -13,6 +13,12 @@ const actionPath = join(repository, ".github/actions/npm-cache/action.yml");
 const readAction = async () =>
   z
     .object({
+      inputs: z
+        .record(
+          z.string(),
+          z.object({ default: z.string().optional() }).passthrough(),
+        )
+        .optional(),
       outputs: z.record(z.string(), z.object({ value: z.string() })),
       runs: z.object({
         steps: z.array(
@@ -42,9 +48,11 @@ const readWorkflows = async () => {
           jobs: z
             .record(
               z.string(),
-              z.object({
-                steps: z.array(z.record(z.string(), z.unknown())).optional(),
-              }),
+              z
+                .object({
+                  steps: z.array(z.record(z.string(), z.unknown())).optional(),
+                })
+                .passthrough(),
             )
             .optional(),
         })
@@ -107,6 +115,9 @@ printf '%s\n' 'C:\Users\runner with spaces\AppData\Local\npm-cache'
       expect(output).toContain(
         `key=npm-download-Windows-${process.arch}-lock-hash\n`,
       );
+      expect(output).toContain(
+        `restore-key=npm-download-Windows-${process.arch}-\n`,
+      );
     }
   });
 
@@ -120,6 +131,7 @@ printf '%s\n' 'C:\Users\runner with spaces\AppData\Local\npm-cache'
       step.uses?.startsWith("actions/cache/restore@"),
     );
 
+    expect(action.inputs?.save?.default).toBe("false");
     expect(action.outputs["can-save"]?.value).toBe(
       "${{ steps.context.outputs.can-save }}",
     );
@@ -138,19 +150,27 @@ printf '%s\n' 'C:\Users\runner with spaces\AppData\Local\npm-cache'
     expect(restoreAndSave?.uses).toBe(
       "actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830",
     );
-    expect(restoreAndSave?.if).toBe("steps.context.outputs.can-save == 'true'");
+    expect(restoreAndSave?.if).toBe(
+      "steps.context.outputs.can-save == 'true' && inputs.save == 'true'",
+    );
     expect(restoreOnly?.uses).toBe(
       "actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830",
     );
-    expect(restoreOnly?.if).toBe("steps.context.outputs.can-save != 'true'");
+    expect(restoreOnly?.if).toBe(
+      "steps.context.outputs.can-save != 'true' || inputs.save != 'true'",
+    );
     expect(restoreAndSave?.with?.path).toBe(
       "${{ steps.context.outputs.path }}",
     );
     expect(restoreOnly?.with?.path).toBe(restoreAndSave?.with?.path);
     expect(restoreAndSave?.with?.key).toBe("${{ steps.context.outputs.key }}");
     expect(restoreOnly?.with?.key).toBe(restoreAndSave?.with?.key);
-    expect(restoreAndSave?.with).not.toHaveProperty("restore-keys");
-    expect(restoreOnly?.with).not.toHaveProperty("restore-keys");
+    expect(restoreAndSave?.with?.["restore-keys"]).toBe(
+      "${{ steps.context.outputs.restore-key }}",
+    );
+    expect(restoreOnly?.with?.["restore-keys"]).toBe(
+      restoreAndSave?.with?.["restore-keys"],
+    );
   });
 
   it("replaces every inline setup-node npm cache immediately and preserves conditions", async () => {
@@ -221,6 +241,59 @@ it("shares static task snapshots only after validation using the npm cache owner
   expect(steps.indexOf(save!)).toBeGreaterThan(
     steps.findIndex((step) => step.run === "npm run test:python"),
   );
+  const retention = steps.find(
+    (step) => step.run === "node scripts/ci/cache-retention.mjs",
+  );
+  expect(retention?.["continue-on-error"]).toBe(true);
+  expect(retention?.if).toContain("success()");
+  expect(retention?.if).toContain("needs.changes.outputs.code == 'true'");
+  expect(retention?.if).toContain("steps.npm-cache.outputs.can-save == 'true'");
+  expect(steps.indexOf(retention!)).toBeGreaterThan(steps.indexOf(save!));
+  const retentionEnv = z.record(z.string(), z.string()).parse(retention?.env);
+  expect(retentionEnv.CACHE_PREFIX).toBe(
+    "rea-static-v1-${{ runner.os }}-${{ runner.arch }}-",
+  );
+  expect(retentionEnv.CACHE_KEEP_KEY).toBe(
+    "${{ steps.static-cache.outputs.cache-primary-key }}",
+  );
+  expect(retentionEnv.CACHE_PORTABLE_PREFIX).toBe(
+    "rea-portable-build-v2-${{ runner.os }}-${{ runner.arch }}-",
+  );
+  expect(retentionEnv.DEDUPE_NPM_DOWNLOADS).toBe("true");
+  expect(retentionEnv.GH_TOKEN).toBe("${{ github.token }}");
+});
+
+it("publishes each hosted npm download cache from one writer", async () => {
+  const workflows = await readWorkflows();
+  const writers: { file: string; job: string; save: string }[] = [];
+  for (const { file, workflow } of workflows)
+    for (const [job, definition] of Object.entries(workflow.jobs ?? {}))
+      for (const step of definition.steps ?? []) {
+        if (step.uses !== "./.github/actions/npm-cache") continue;
+        const save = z
+          .record(z.string(), z.unknown())
+          .parse(step.with ?? {}).save;
+        if (save === undefined) continue;
+        writers.push({ file, job, save: z.string().parse(save) });
+      }
+  expect(writers).toEqual([
+    { file: "ci.yml", job: "static", save: "true" },
+    {
+      file: "ci.yml",
+      job: "package-e2e",
+      save: "${{ matrix.os != 'ubuntu-latest' }}",
+    },
+    { file: "ci.yml", job: "windows-curated", save: "true" },
+  ]);
+  const ci = workflows.find(({ file }) => file === "ci.yml");
+  expect(ci?.workflow.jobs?.static?.permissions).toEqual({
+    contents: "read",
+    actions: "write",
+  });
+  expect(ci?.workflow.jobs?.build?.permissions).toEqual({
+    contents: "read",
+    actions: "read",
+  });
 });
 
 it("passes the npm cache owner's selected path to package installation", async () => {

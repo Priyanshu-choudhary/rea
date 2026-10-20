@@ -560,8 +560,9 @@ metadata, and available manifests into `.cache/ci-build-cache/`.
 `portable-build-cache.json` records availability per task. Evicted or partially
 missing entries are omitted as whole entries, and consumers rebuild cache misses,
 including when every entry is unavailable. Malformed plans, non-file entries,
-and I/O errors other than disappearance still fail publication. Older cross-run entries stay in the
-original cache. The Windows lane relies on the Linux static job for typechecking. They retain the normal build and prepack
+and I/O errors other than disappearance still fail publication. After a trusted
+static run, superseded cross-run Turbo snapshots for that OS and architecture
+are deleted down to the two newest generations. The Windows lane relies on the Linux static job for typechecking. They retain the normal build and prepack
 commands, which restore matching outputs or rebuild on a cache miss. Native
 artifacts, dependency installs, package archives, and runtime verification remain
 host-local. Keep platform-dependent outputs out of this shared cache.
@@ -1323,13 +1324,23 @@ entry, so changes to those inputs cannot reuse an older successful check.
 
 The shared npm-cache action caches downloads, not `node_modules`, and every
 consumer still runs `npm ci`. Keys cover the runner OS, actual Node architecture,
-root lockfiles, and `.npmrc`. Only push, schedule, and manual events on the
-repository's default branch may save shared npm caches; PRs restore only.
-Static snapshots use the same write authority and are saved only after the
-static job's validation succeeds. Main warms the new cache namespace after
-merge; a cold cache or changed lockfile falls back to the normal install.
-This prevents each PR from saving another branch-scoped copy of the same
-download cache. It does not remove runner assignment waits.
+root lockfiles, and `.npmrc`. An exact-key miss restores the newest cache for
+that OS and architecture, so a lockfile change reuses unchanged tarballs while
+`npm ci` still verifies the lockfile. Only push, schedule, and manual events on
+the repository's default branch may save shared npm caches, and only from the
+opted-in writer for that host: Static checks for Linux x64, the package matrix
+for every other included host, and the Windows curated lane. Every other job
+restores without saving, so parallel jobs do not publish duplicate copies.
+Pull requests restore only. Static snapshots use the same write authority and
+are saved only after the static job's validation succeeds. That job then deletes
+older `rea-static-v1` and `rea-portable-build-v2` entries for its OS and
+architecture, keeping two generations plus the key it saved, and deletes
+duplicate npm download keys down to the most recently accessed copy. An
+incomplete or unexpected cache list deletes nothing. Distinct lockfile
+generations of the download cache stay, so the restore prefix still has a seed.
+Main warms the new cache namespace after merge; a cold cache falls back to the
+normal install. This prevents each PR from saving another branch-scoped copy of
+the same download cache. It does not remove runner assignment waits.
 
 Portable owner-based test selection remains observational. Its reports compare
 proposed omissions with the full run; incomplete or skipped observations do not

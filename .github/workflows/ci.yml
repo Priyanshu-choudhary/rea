@@ -116,6 +116,12 @@ jobs:
     if: ${{ !cancelled() && needs.changes.outputs.tier != 'reused' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      # actions: write deletes superseded Turbo snapshots after validation.
+      # Fork pull requests still receive a read-only token, and this job saves
+      # caches only for trusted default-branch events.
+      contents: read
+      actions: write
     steps:
       - name: Require successful change classification
         env:
@@ -128,6 +134,9 @@ jobs:
       - name: Cache npm package downloads
         id: npm-cache
         uses: ./.github/actions/npm-cache
+        with:
+          # Linux x64 writer. Parallel Linux jobs restore this key.
+          save: "true"
       - run: npm ci
       - name: Restore static task cache
         if: needs.changes.outputs.code == 'true'
@@ -170,6 +179,19 @@ jobs:
         with:
           path: .turbo/cache/
           key: ${{ steps.static-cache.outputs.cache-primary-key }}
+      - name: Retain current Turbo snapshots and npm download caches
+        if: >-
+          success() && needs.changes.outputs.code == 'true' &&
+          steps.npm-cache.outputs.can-save == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_REPOSITORY: ${{ github.repository }}
+          CACHE_PREFIX: rea-static-v1-${{ runner.os }}-${{ runner.arch }}-
+          CACHE_KEEP_KEY: ${{ steps.static-cache.outputs.cache-primary-key }}
+          CACHE_PORTABLE_PREFIX: rea-portable-build-v2-${{ runner.os }}-${{ runner.arch }}-
+          DEDUPE_NPM_DOWNLOADS: "true"
+        run: node scripts/ci/cache-retention.mjs
       - name: Upload complete static diagnostics
         if: always() && needs.changes.outputs.code == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -577,6 +599,9 @@ jobs:
       - name: Cache npm package downloads
         id: npm-cache
         uses: ./.github/actions/npm-cache
+        with:
+          # ubuntu-latest is the Linux x64 writer above. Other hosts save their own key.
+          save: ${{ matrix.os != 'ubuntu-latest' }}
       - name: Verify native runtime identity
         env:
           EXPECTED_CI_PLATFORM: ${{ matrix.platform }}
@@ -713,6 +738,8 @@ jobs:
       - name: Cache npm package downloads
         id: npm-cache
         uses: ./.github/actions/npm-cache
+        with:
+          save: "true"
       - run: npm ci
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
