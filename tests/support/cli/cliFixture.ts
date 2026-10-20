@@ -42,47 +42,97 @@ export interface TestCli {
   sharedMcpCall?(): Promise<SharedMcpCall>;
 }
 
-interface FileMcpSession {
+/** One file-scoped stdio MCP session. */
+export interface SharedMcpSession {
   call(): Promise<SharedMcpCall>;
 }
 
-/** Start at most one stdio server for the file, including after a failed handshake. */
-const createFileMcpSession = (
-  compileCache: string,
-): { session: FileMcpSession; close(): Promise<void> } => {
+const sharedMcpSessionClosed = (): Error =>
+  new Error("Shared MCP session is closed");
+
+/**
+ * Start at most one server for the file, including after a failed handshake.
+ * Close waits for startup still in flight. A connector that sees `isClosed`
+ * can skip the server; a server registered after close is still cleaned up.
+ */
+export const createSharedMcpSession = (
+  connect: (
+    registerCleanup: (cleanup: () => Promise<void>) => void,
+    isClosed: () => boolean,
+  ) => Promise<SharedMcpCall>,
+): { session: SharedMcpSession; close(): Promise<void> } => {
   let pending: Promise<SharedMcpCall> | undefined;
+  let closed = false;
+  let closing: Promise<void> | undefined;
+  let cleanupQueue: Promise<void> = Promise.resolve();
   const cleanups: Array<() => Promise<void>> = [];
-  const closeFailedHandshake = async (): Promise<void> => {
-    const failed = cleanups.splice(0).reverse();
-    for (const cleanup of failed) await cleanup();
+  const drain = (): Promise<void> => {
+    const run = cleanupQueue
+      .then(
+        () => undefined,
+        () => undefined,
+      )
+      .then(async () => {
+        while (cleanups.length > 0) {
+          const closers = cleanups.splice(0).reverse();
+          for (const cleanup of closers) await cleanup();
+        }
+      });
+    cleanupQueue = run;
+    return run;
+  };
+  const registerCleanup = (cleanup: () => Promise<void>): void => {
+    cleanups.push(cleanup);
   };
   return {
     session: {
       call: () => {
-        pending ??= import("../../fixtures/localToolsMcp.js")
-          .then(({ connectLocalToolsMcp }) =>
-            connectLocalToolsMcp(
-              { NODE_COMPILE_CACHE: compileCache },
-              (cleanup) => {
-                cleanups.push(cleanup);
-              },
-            ),
-          )
-          .then((mcp) => mcp.call)
+        if (closed) return Promise.reject(sharedMcpSessionClosed());
+        pending ??= connect(registerCleanup, () => closed)
+          .then((call) => {
+            if (closed) throw sharedMcpSessionClosed();
+            return call;
+          })
           .catch(async (error: unknown) => {
-            pending = undefined;
-            await closeFailedHandshake();
+            // Close owns cleanup once shutdown has started, so a failed
+            // handshake cannot clear the in-flight startup close is awaiting.
+            if (!closed) {
+              pending = undefined;
+              await drain();
+            }
             throw error;
           });
         return pending;
       },
     },
-    close: async () => {
-      const closers = cleanups.splice(0).reverse();
-      for (const cleanup of closers) await cleanup();
+    close: () => {
+      closed = true;
+      const starting = pending;
+      closing ??= (async () => {
+        if (starting !== undefined) {
+          await starting.catch(() => undefined);
+        }
+        await drain();
+      })();
+      return closing;
     },
   };
 };
+
+const createFileMcpSession = (
+  compileCache: string,
+): { session: SharedMcpSession; close(): Promise<void> } =>
+  createSharedMcpSession(async (registerCleanup, isClosed) => {
+    const { connectLocalToolsMcp } = await import(
+      "../../fixtures/localToolsMcp.js"
+    );
+    if (isClosed()) throw sharedMcpSessionClosed();
+    const mcp = await connectLocalToolsMcp(
+      { NODE_COMPILE_CACHE: compileCache },
+      registerCleanup,
+    );
+    return mcp.call;
+  });
 
 const parseJson = (stdout: string): unknown | undefined => {
   const document = stdout.trim();
@@ -146,7 +196,7 @@ export const createTestCli = (
 /** Vitest API extended with an owned process registry and compiled CLI driver. */
 export const cliTest = processTest.extend<{
   $test: { cli: TestCli };
-  $file: { mcpSession: FileMcpSession };
+  $file: { mcpSession: SharedMcpSession };
   $worker: { cliCompileCache: string };
 }>({
   cliCompileCache: [
