@@ -143,7 +143,9 @@ independently without this fixture cache.
 `analyzeJavaScriptDirectory` stdio MCP cases in one `cliTest` file share one
 server and that compile cache. The first case pays startup; later cases reuse
 the process. File teardown waits for startup still in flight, closes a server
-registered during that wait, and does not open a server after close. Pass
+registered during that wait, and does not open a server after close. A failed
+handshake stays the caller error when its cleanup also fails, and that cleanup
+is retried without repeating one that already succeeded. Pass
 `mcpCall` when a case needs its own server, environment, or lifecycle. CLI
 cases still start a fresh process.
 

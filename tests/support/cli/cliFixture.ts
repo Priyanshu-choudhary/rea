@@ -50,6 +50,20 @@ export interface SharedMcpSession {
 const sharedMcpSessionClosed = (): Error =>
   new Error("Shared MCP session is closed");
 
+/** Keep the handshake as the caller error and retain the cleanup failure beside it. */
+const startupFailureWithCleanup = (
+  startup: unknown,
+  cleanup: unknown,
+): Error => {
+  const primary =
+    startup instanceof Error ? startup : new Error(String(startup));
+  return new Error(primary.message, {
+    cause: new AggregateError([primary, cleanup], primary.message, {
+      cause: primary,
+    }),
+  });
+};
+
 /**
  * Start at most one server for the file, including after a failed handshake.
  * Close waits for startup still in flight. A connector that sees `isClosed`
@@ -73,9 +87,26 @@ export const createSharedMcpSession = (
         () => undefined,
       )
       .then(async () => {
+        const failures: unknown[] = [];
+        const retained: Array<() => Promise<void>> = [];
         while (cleanups.length > 0) {
-          const closers = cleanups.splice(0).reverse();
-          for (const cleanup of closers) await cleanup();
+          const cleanup = cleanups.pop();
+          if (cleanup === undefined) break;
+          try {
+            await cleanup();
+          } catch (error) {
+            failures.push(error);
+            retained.push(cleanup);
+          }
+        }
+        for (const cleanup of retained.reverse()) cleanups.push(cleanup);
+        const failure = failures[0];
+        if (failures.length === 1 && failure !== undefined) throw failure;
+        if (failures.length > 1) {
+          throw new AggregateError(
+            failures,
+            "Shared MCP session cleanup failed",
+          );
         }
       });
     cleanupQueue = run;
@@ -98,7 +129,11 @@ export const createSharedMcpSession = (
             // handshake cannot clear the in-flight startup close is awaiting.
             if (!closed) {
               pending = undefined;
-              await drain();
+              try {
+                await drain();
+              } catch (cleanupError) {
+                throw startupFailureWithCleanup(error, cleanupError);
+              }
             }
             throw error;
           });
