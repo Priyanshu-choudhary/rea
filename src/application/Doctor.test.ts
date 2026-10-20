@@ -89,7 +89,7 @@ describe("doctor Hopper startup timeout", () => {
     },
   );
 
-  it("keeps an invalid Hopper timeout informational outside the Hopper scope", async () => {
+  it("keeps an invalid Hopper timeout informational when no provider is selected", async () => {
     const selectedHost = timeoutHost("0");
     const result = await runDoctor(undefined, selectedHost, { providers: [] });
     expect(result.healthy).toBe(true);
@@ -98,6 +98,57 @@ describe("doctor Hopper startup timeout", () => {
         name: "hopper-startup-timeout",
         ok: false,
       }),
+    );
+  });
+
+  it("requires an invalid Hopper timeout for a ready non-Hopper provider", async () => {
+    const ghidra = {
+      providerInspections: () =>
+        Promise.resolve([
+          {
+            id: "ghidra" as const,
+            configured: true,
+            available: true,
+            providerVersion: "12.1.4",
+            registrationEnvironment: { GHIDRA_INSTALL_DIR: "/tools/ghidra" },
+            checks: [
+              {
+                name: "configuration",
+                ok: true,
+                code: null,
+                detail: "/tools/ghidra",
+                remediation: null,
+                classification: "config_drift" as const,
+              },
+            ],
+          },
+        ]),
+    };
+    const blocked = await runDoctor(undefined, timeoutHost("abc", ghidra), {
+      providers: ["ghidra"],
+    });
+    expect(blocked.healthy).toBe(false);
+    expect(blocked.scope_checks).toContainEqual(
+      expect.objectContaining({
+        name: "hopper-startup-timeout",
+        ok: false,
+        classification: "config_drift",
+      }),
+    );
+    expect(
+      blocked.scope_checks.filter(
+        ({ name }) => name === "hopper-startup-timeout",
+      ),
+    ).toHaveLength(1);
+
+    const ready = await runDoctor(
+      undefined,
+      timeoutHost("120000", ghidra),
+      { providers: ["ghidra"] },
+    );
+    expect(ready.healthy).toBe(true);
+    expect(ready.scope_checks).toContainEqual(
+      expect.objectContaining({ name: "hopper-startup-timeout", ok: true }),
     );
   });
 });

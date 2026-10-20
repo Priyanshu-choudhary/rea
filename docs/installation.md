@@ -343,8 +343,9 @@ but the report remains audit-wide unless a scope option is also supplied.
 An invalid `REA_LOG_LEVEL` is required in every scope, including one client or
 the installed skill, because the executable and MCP server reject it before
 starting. Other native-analysis settings, such as
-`REA_GHIDRA_STARTUP_TIMEOUT_MS`, affect a selected provider and the audit-wide
-result.
+`REA_GHIDRA_STARTUP_TIMEOUT_MS` and `REA_HOPPER_STARTUP_TIMEOUT_MS`, fail every
+selected provider and the audit-wide result. A client or skill scope leaves
+those settings informational.
 
 Follow the remediation for the failed check. If a native target has several
 available providers, choose one with `--provider` on the CLI or `provider_id`
